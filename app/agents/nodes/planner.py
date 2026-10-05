@@ -1,0 +1,102 @@
+from langchain_groq import ChatGroq
+from app.agents.state import AgentState
+from app.config import settings
+import logfire
+
+# initialise the groq model
+llm = ChatGroq(
+    api_key=settings.GROQ_API_KEY,
+    model = settings.GROQ_MODEL,
+    temperature=0
+)
+
+def planner_node(state: AgentState):
+    """
+    Analyze the conversation and determine whether the user
+    needs a conversational response or technical research.
+    For research requests, generate a focused search query.
+    """
+    try:
+        with logfire.span("Planner Decision"):
+
+            history = ""
+
+            for msg in state["messages"][:-1]:
+                role = "User" if msg["role"] == "user" else "Assistant"
+                history += f"{role}: {msg['content']}\n"
+
+            user_message = (
+                state["messages"][-1]["content"]
+                if state["messages"]
+                else ""
+            )
+
+            prompt = f"""
+            You are a research agent planner.
+
+            Conversation history:
+            {history}
+
+            Latest user message:
+            {user_message}
+
+            Determine the user's intent.
+
+            If the user is:
+            - Greeting or casual conversation
+            - Asking something that can be answered from conversation history
+
+            Return:
+            CONVERSATIONAL
+
+            If the user needs external research:
+            - Technical questions
+            - Kubernetes
+            - Networking
+            - Intel
+            - Current information
+            - Documentation
+            - Any question requiring external knowledge
+
+            Return ONLY a concise and optimized search query.
+
+            Do not provide an answer.
+            """
+
+            decision = llm.invoke(prompt).content.strip()
+
+            logfire.info(
+                "Planner decision",
+                decision=decision
+            )
+
+            if decision == "CONVERSATIONAL":
+                return {
+                    "current_query": "CONVERSATIONAL",
+                    "status": "Conversational response required",
+                    "plan": [
+                        "Intent: Conversational",
+                        "Retrieval: Skipped"
+                    ]
+                }
+
+            return {
+                "current_query": decision,
+                "status": "Research required",
+                "plan": [
+                    "Intent: Research",
+                    f"Search Query: {decision}"
+                ]
+            }
+
+    except Exception as e:
+        logfire.exception(
+            "Planner node failed",
+            error=str(e)
+        )
+
+        return {
+            "current_query": "",
+            "status": "Planner error",
+            "plan": []
+        }
