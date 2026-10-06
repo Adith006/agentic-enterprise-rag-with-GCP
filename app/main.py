@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.agents.graph import rag_agent
+from app.guardrails.rails import guard, initialize_rails
 
 
 # ============================================================
@@ -39,6 +40,17 @@ app = FastAPI(
     title="Enterprise Agentic RAG API"
 )
 logfire.instrument_fastapi(app)
+
+
+@app.on_event("startup")
+def initialise_guardrails() -> None:
+    """Create the NeMo rails singleton once per API instance."""
+    try:
+        initialize_rails()
+    except Exception as exc:
+        # Keep the API available if the guard model cannot initialise; the
+        # guard() helper will log that the gate is unavailable on each request.
+        logfire.exception("Failed to initialise NeMo Guardrails", error=str(exc))
 
 
 # ============================================================
@@ -143,6 +155,17 @@ def query(request: QueryRequest):
             "Agentic RAG Query",
             thread_id=thread_id
         ):
+
+            rail_fired, rail_response = guard(q)
+            if rail_fired:
+                logfire.info(f"Request blocked by guardrails | thread={thread_id}")
+                return {
+                    "question": q,
+                    "answer": rail_response or "I cannot help with that request.",
+                    "thought_process": ["Request handled by NeMo Guardrails"],
+                    "status": "guardrail_handled",
+                    "sources": [],
+                }
 
             final_output = rag_agent.invoke(
                 initial_state,
