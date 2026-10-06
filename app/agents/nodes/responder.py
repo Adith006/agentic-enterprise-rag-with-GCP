@@ -1,17 +1,28 @@
-from langchain_groq import ChatGroq
-from app.agents.state import AgentState
-from app.config import settings
 import logfire
 
-import logfire
+from langchain_groq import ChatGroq
 from app.agents.state import AgentState
-from app.gateway import portkey_client, extract_cache_status
+from app.agents.token_budget import (
+    MAX_RESPONSE_COMPLETION_TOKENS,
+    MAX_RESPONSE_PROMPT_TOKENS,
+    build_bounded_prompt,
+)
+from app.config import settings
+
+
+# Initialize Groq LLM
+llm = ChatGroq(
+    api_key=settings.GROQ_API_KEY,
+    model=settings.GROQ_MODEL,
+    temperature=0.1,
+    max_tokens=MAX_RESPONSE_COMPLETION_TOKENS,
+)
 
 
 def responder_node(state: AgentState):
     """
-    Generates the final response using conversation history and,
-    when available, retrieved research documents.
+    Generates the final response using conversation history
+    and retrieved research documents when available.
     """
 
     try:
@@ -23,8 +34,14 @@ def responder_node(state: AgentState):
             history_str = ""
 
             for msg in state["messages"][:-1]:
-                role = "User" if msg["role"] == "user" else "Assistant"
-                history_str += f"{role}: {msg['content']}\n"
+                role = (
+                    "User"
+                    if msg["role"] == "user"
+                    else "Assistant"
+                )
+                history_str += (
+                    f"{role}: {msg['content']}\n"
+                )
 
             user_msg = (
                 state["messages"][-1]["content"]
@@ -32,86 +49,94 @@ def responder_node(state: AgentState):
                 else ""
             )
 
-            # Conversational response
             if query == "CONVERSATIONAL":
 
                 logfire.info(
                     "Generating conversational response"
                 )
 
-                prompt = f"""
-                You are a friendly and helpful AI assistant.
+                prompt_template = """
+You are a friendly and helpful AI assistant.
 
-                Use the conversation history to understand the user
-                and respond naturally.
+Use the conversation history to understand the user
+and keep your response short.
 
-                CONVERSATION HISTORY:
-                {history_str}
+CONVERSATION HISTORY:
+{history}
 
-                USER MESSAGE:
-                {user_msg}
+USER MESSAGE:
+{user_msg}
 
-                Give a concise and helpful response.
-                """
+Give a short,concise and helpful response.
+"""
 
-            # Research-based response
+                prompt_parts = {
+                    "history": history_str,
+                    "context": "",
+                    "user_msg": user_msg,
+                }
             else:
 
                 logfire.info(
-                    "Generating research-based response"
+                    "Generating research response"
                 )
 
-                context = "\n\n".join(state.get("documents", []))
+                context = "\n\n".join(
+                    state.get("documents", [])
+                )
 
-                prompt = f"""
-                You are a Senior Technical Research Assistant.
+                prompt_template = """
+You are a Senior Technical Research Assistant.
 
-                Answer the user's question using the research context
-                provided below.
+Answer the user's question using the research
+context provided below.
 
-                RESEARCH CONTEXT:
-                {context}
+RESEARCH CONTEXT:
+{context}
 
-                CONVERSATION HISTORY:
-                {history_str}
+CONVERSATION HISTORY:
+{history}
 
-                USER QUESTION:
-                {user_msg}
+USER QUESTION:
+{user_msg}
 
-                If the context does not contain enough information,
-                clearly state that instead of inventing information.
-                """
+If the context does not contain enough information,
+clearly state that instead of inventing information.
+"""
 
-            # Generate response
-            response = portkey_client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.1
+                prompt_parts = {
+                    "history": history_str,
+                    "context": context,
+                    "user_msg": user_msg,
+                }
+
+            prompt, prompt_token_count = build_bounded_prompt(
+                prompt_template,
+                prompt_parts,
+                token_limit=MAX_RESPONSE_PROMPT_TOKENS,
+                trim_order=("history", "context", "user_msg"),
+            )
+            logfire.info(
+                "Prepared token-bounded answer request",
+                prompt_tokens=prompt_token_count,
+                max_completion_tokens=MAX_RESPONSE_COMPLETION_TOKENS,
+                request_token_budget=(
+                    prompt_token_count + MAX_RESPONSE_COMPLETION_TOKENS
+                ),
             )
 
-            content = response.choices[0].message.content
+            # Generate response
+            response = llm.invoke(prompt)
 
-            # Check Portkey cache
-            cache_status = extract_cache_status(response)
+            content = response.content
 
-            if cache_status == "HIT":
-                logfire.info(
-                    "Portkey cache hit"
-                )
-                status = "Response generated from cache."
-            else:
-                logfire.info(
-                    "Response generated using LLM"
-                )
-                status = "Response generated."
+            logfire.info(
+                "Response generated successfully"
+            )
 
             return {
                 "final_answer": content,
-                "status": status,
+                "status": "Response generated.",
                 "messages": [
                     {
                         "role": "assistant",
@@ -121,8 +146,10 @@ def responder_node(state: AgentState):
             }
 
     except Exception as e:
+
         logfire.exception(
             "Responder node failed",
             error=str(e)
         )
+
         raise

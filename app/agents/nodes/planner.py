@@ -1,5 +1,10 @@
 from langchain_groq import ChatGroq
 from app.agents.state import AgentState
+from app.agents.token_budget import (
+    MAX_PLANNER_COMPLETION_TOKENS,
+    MAX_PLANNER_PROMPT_TOKENS,
+    build_bounded_prompt,
+)
 from app.config import settings
 import logfire
 
@@ -7,7 +12,8 @@ import logfire
 llm = ChatGroq(
     api_key=settings.GROQ_API_KEY,
     model = settings.GROQ_MODEL,
-    temperature=0
+    temperature=0,
+    max_tokens=MAX_PLANNER_COMPLETION_TOKENS,
 )
 
 def planner_node(state: AgentState):
@@ -31,7 +37,7 @@ def planner_node(state: AgentState):
                 else ""
             )
 
-            prompt = f"""
+            prompt_template = """
             You are a research agent planner.
 
             Conversation history:
@@ -62,6 +68,21 @@ def planner_node(state: AgentState):
 
             Do not provide an answer.
             """
+
+            prompt, prompt_token_count = build_bounded_prompt(
+                prompt_template,
+                {
+                    "history": history,
+                    "user_message": user_message,
+                },
+                token_limit=MAX_PLANNER_PROMPT_TOKENS,
+                trim_order=("history", "user_message"),
+            )
+            logfire.info(
+                "Prepared token-bounded planner request",
+                prompt_tokens=prompt_token_count,
+                max_completion_tokens=MAX_PLANNER_COMPLETION_TOKENS,
+            )
 
             decision = llm.invoke(prompt).content.strip()
 

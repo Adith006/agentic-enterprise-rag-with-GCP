@@ -8,5 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+enpragenv/
 .env
-app/config.py
+.logfire/

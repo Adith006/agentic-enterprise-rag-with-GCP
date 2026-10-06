@@ -1,8 +1,7 @@
 import logfire
 from qdrant_client import QdrantClient
-from qdrant_client.http import models
 from app.config import settings
-from app.services.retrieval.embedding import get_embedding_model, embed_query
+from app.services.retrieval.embedding import embed_query
 
 
 # Initialize Qdrant Client
@@ -29,13 +28,18 @@ def search_enterprise_knowledge(query: str, limit: int = 8):
 
         results = []
         for res in response.points:
+            payload = res.payload or {}
+            content = payload.get("text")
+            if not content:
+                continue
+
             results.append({
-                "content": res.payload.get("text", ""),
-                "source": res.payload.get("source", "Unknown"),
+                "content": content,
+                "source": payload.get("source", "Unknown"),
                 "score": res.score
             })
         
         return results
     except Exception as e:
-        logfire.error(f"❌ Qdrant Search Failed: {e}")
-        return []
+        logfire.exception("Qdrant search failed", error=str(e))
+        raise

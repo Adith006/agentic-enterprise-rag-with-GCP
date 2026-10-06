@@ -12,6 +12,7 @@ class AgentState(TypedDict):
     messages: Annotated[List[dict],operator.add]
     current_query:str
     documents: List[str]
+    retrieved_sources: List[dict]
     plan: List[str]
     status: str
     final_answer: str

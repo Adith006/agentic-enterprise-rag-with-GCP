@@ -3,15 +3,22 @@
 # ============================================================
 
 import os
+import logging
 import logfire
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logfire_token = os.getenv("LOGFIRE_TOKEN")
 logfire.configure(
-    token=os.getenv("LOGFIRE_TOKEN")
+    token=logfire_token,
+    service_name="rag-api",
 )
+if not logfire_token:
+    logging.getLogger(__name__).warning(
+        "LOGFIRE_TOKEN is not configured; traces will not be sent to Logfire."
+    )
 
 # ============================================================
 # App imports
@@ -31,6 +38,7 @@ from app.agents.graph import rag_agent
 app = FastAPI(
     title="Enterprise Agentic RAG API"
 )
+logfire.instrument_fastapi(app)
 
 
 # ============================================================
@@ -117,6 +125,7 @@ def query(request: QueryRequest):
         ],
         "current_query": q,
         "documents": [],
+        "retrieved_sources": [],
         "plan": ["Start"],
         "status": "Initializing...",
         "final_answer": ""
@@ -157,7 +166,7 @@ def query(request: QueryRequest):
                     ""
                 ),
                 "sources": final_output.get(
-                    "documents",
+                    "retrieved_sources",
                     []
                 )
             }
