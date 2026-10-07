@@ -1,28 +1,18 @@
 import logfire
 
-from langchain_groq import ChatGroq
 from app.agents.state import AgentState
 from app.agents.token_budget import (
     MAX_RESPONSE_COMPLETION_TOKENS,
     MAX_RESPONSE_PROMPT_TOKENS,
     build_bounded_prompt,
 )
-from app.config import settings
-
-
-# Initialize Groq LLM
-llm = ChatGroq(
-    api_key=settings.GROQ_API_KEY,
-    model=settings.GROQ_MODEL,
-    temperature=0.1,
-    max_tokens=MAX_RESPONSE_COMPLETION_TOKENS,
-)
+from app.gateway import portkey_client, extract_cache_status
 
 
 def responder_node(state: AgentState):
     """
     Generates the final response using conversation history
-    and retrieved research documents when available.
+    and retrieved research documents through Portkey.
     """
 
     try:
@@ -30,7 +20,6 @@ def responder_node(state: AgentState):
 
             query = state["current_query"]
 
-            # Build conversation history
             history_str = ""
 
             for msg in state["messages"][:-1]:
@@ -39,9 +28,7 @@ def responder_node(state: AgentState):
                     if msg["role"] == "user"
                     else "Assistant"
                 )
-                history_str += (
-                    f"{role}: {msg['content']}\n"
-                )
+                history_str += f"{role}: {msg['content']}\n"
 
             user_msg = (
                 state["messages"][-1]["content"]
@@ -67,7 +54,7 @@ CONVERSATION HISTORY:
 USER MESSAGE:
 {user_msg}
 
-Give a short,concise and helpful response.
+Give a short, concise and helpful response.
 """
 
                 prompt_parts = {
@@ -75,6 +62,7 @@ Give a short,concise and helpful response.
                     "context": "",
                     "user_msg": user_msg,
                 }
+
             else:
 
                 logfire.info(
@@ -116,27 +104,58 @@ clearly state that instead of inventing information.
                 token_limit=MAX_RESPONSE_PROMPT_TOKENS,
                 trim_order=("history", "context", "user_msg"),
             )
+
             logfire.info(
                 "Prepared token-bounded answer request",
                 prompt_tokens=prompt_token_count,
                 max_completion_tokens=MAX_RESPONSE_COMPLETION_TOKENS,
                 request_token_budget=(
-                    prompt_token_count + MAX_RESPONSE_COMPLETION_TOKENS
+                    prompt_token_count
+                    + MAX_RESPONSE_COMPLETION_TOKENS
                 ),
             )
 
-            # Generate response
-            response = llm.invoke(prompt)
-
-            content = response.content
-
-            logfire.info(
-                "Response generated successfully"
+            # Generate response through Portkey
+            response = portkey_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=MAX_RESPONSE_COMPLETION_TOKENS,
             )
+
+            content = response.choices[0].message.content
+
+            # Check Portkey cache
+            cache_status = extract_cache_status(response)
+
+            if cache_status == "HIT":
+                logfire.info(
+                    "Gateway Cache Hit — response served from Portkey cache."
+                )
+
+                plan_update = state["plan"] + [
+                    "Cache: Hit"
+                ]
+
+                status = "Cache hit — instant response."
+
+            else:
+                logfire.info(
+                    "Response generated through Portkey."
+                )
+
+                plan_update = state["plan"]
+
+                status = "Response generated."
 
             return {
                 "final_answer": content,
-                "status": "Response generated.",
+                "status": status,
+                "plan": plan_update,
                 "messages": [
                     {
                         "role": "assistant",

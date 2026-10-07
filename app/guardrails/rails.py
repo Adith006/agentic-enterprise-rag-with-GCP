@@ -1,6 +1,6 @@
 import logfire
 import re
-from langchain_groq import ChatGroq
+from app.gateway import get_langchain_llm
 from nemoguardrails import RailsConfig, LLMRails
 
 
@@ -29,11 +29,7 @@ def initialize_rails() -> None:
     """
     global _rails
 
-    guard_llm = ChatGroq(
-        api_key=settings.GROQ_API_KEY,
-        model=settings.GROQ_MODEL,
-        temperature=0
-    )
+    guard_llm =  get_langchain_llm(feature="guardrails")
 
     config = RailsConfig.from_content(
         colang_content=COLANG_CONTENT,

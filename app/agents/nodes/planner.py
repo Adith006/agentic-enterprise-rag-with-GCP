@@ -7,14 +7,10 @@ from app.agents.token_budget import (
 )
 from app.config import settings
 import logfire
+from app.gateway import get_langchain_llm
 
 # initialise the groq model
-llm = ChatGroq(
-    api_key=settings.GROQ_API_KEY,
-    model = settings.GROQ_MODEL,
-    temperature=0,
-    max_tokens=MAX_PLANNER_COMPLETION_TOKENS,
-)
+llm = get_langchain_llm(feature="planner")
 
 def planner_node(state: AgentState):
     """

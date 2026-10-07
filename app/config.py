@@ -20,7 +20,17 @@ class Settings:
 
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
+    GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY","")
+
     GROQ_MODEL = "openai/gpt-oss-120b"
+
+    # Portkey virtual-key IDs.  These must be read from the environment;
+    # literal variable names are not valid virtual keys.
+    GROQ_SLUG = os.getenv("GROQ_SLUG", "").strip()
+    GROQ_SLUG_2 = os.getenv("GROQ_SLUG_2", "").strip()
+
+    PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY","")
+    PORTKEY_CONFIG_ID = os.getenv("PORTKEY_CONFIG_ID","")
 
 
     DB_USER = os.getenv("DB_USER","postgres")
